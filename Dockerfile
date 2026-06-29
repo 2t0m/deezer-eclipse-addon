@@ -8,7 +8,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app.py .
+COPY app.py helpers.py crypto.py ./
+COPY routes/ ./routes/
 
 # Expose port
 EXPOSE 3000
@@ -22,10 +23,13 @@ ENV PORT=3000
 RUN mkdir -p /tmp/deemix-imgs
 
 # Run with Gunicorn (production WSGI server)
-# --workers 2: Two worker processes
-# --threads 4: Four threads per worker = 8 concurrent requests
+# --workers 1: Single worker process
+# --threads 4: Four threads = 4 concurrent requests
 # --timeout 120: Long timeout for streaming
-# --access-logfile -: Log HTTP requests to stdout
-# --error-logfile -: Log errors to stdout
+# --access-logfile: Enabled in DEBUG mode, disabled in NORMAL mode
 # --capture-output: Capture print() statements
-CMD ["gunicorn", "--bind", "0.0.0.0:3000", "--workers", "2", "--threads", "4", "--timeout", "120", "--access-logfile", "-", "--error-logfile", "-", "--capture-output", "app:app"]
+CMD if [ "$DEBUG" = "true" ]; then \
+      gunicorn --bind 0.0.0.0:3000 --workers 1 --threads 4 --timeout 120 --access-logfile - --error-logfile - --capture-output app:app; \
+    else \
+      gunicorn --bind 0.0.0.0:3000 --workers 1 --threads 4 --timeout 120 --access-logfile /dev/null --error-logfile - --capture-output app:app; \
+    fi

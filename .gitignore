@@ -45,3 +45,6 @@ test*.mp3
 *.tmp
 *.temp
 .cache/
+
+# Deployment scripts (local only)
+*.sh

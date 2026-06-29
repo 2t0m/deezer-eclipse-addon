@@ -1,12 +1,18 @@
-version: '3.8'
 services:
   deezer-addon:
-    image: ghcr.io/2t0m/deezer-eclipse-addon:latest
+    image: deezer-eclipse-addon:latest
     container_name: deezer-eclipse-addon
     restart: unless-stopped
     environment:
       - DEEZER_ARL=${DEEZER_ARL}
       - API_KEY=${API_KEY}
+      - DEBUG=${DEBUG:-false}
       - PORT=3000
     ports:
       - "3000:3000"
+    networks:
+      - npm-network
+
+networks:
+  npm-network:
+    external: true

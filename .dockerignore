@@ -8,10 +8,11 @@ DEPLOIEMENT_ORACLE.md
 CONFORMITE.md
 README.md
 
-# Tests
+# Tests and scripts
 test.py
 test_*.py
 check_*.py
+*.sh
 
 # Python cache
 __pycache__/
@@ -36,11 +37,16 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Docker
+# Docker files
 docker-compose.yml
 Dockerfile
 .dockerignore
 
-# Environment (le .env ne devrait pas être dans l'image)
+# Environment
 .env
 .env.example
+
+# Temporary files
+*.tmp
+*.temp
+.cache/
