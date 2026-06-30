@@ -4,14 +4,20 @@ services:
     container_name: deezer-eclipse-addon
     restart: unless-stopped
     environment:
-      - DEEZER_ARL=${DEEZER_ARL}
+      - DEEZER_EMAIL=${DEEZER_EMAIL}
+      - DEEZER_PASSWORD=${DEEZER_PASSWORD}
       - API_KEY=${API_KEY}
       - DEBUG=${DEBUG:-false}
       - PORT=3000
     ports:
       - "3000:3000"
+    volumes:
+      - deezer-config:/app/config
     networks:
       - npm-network
+
+volumes:
+  deezer-config:
 
 networks:
   npm-network:

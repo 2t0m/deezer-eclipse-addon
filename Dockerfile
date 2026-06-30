@@ -3,12 +3,26 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-# Install dependencies
+# Install Chrome/Chromium and dependencies for Selenium (ARL auto-refresh)
+RUN apt-get update && apt-get install -y \
+    wget \
+    gnupg \
+    unzip \
+    curl \
+    chromium \
+    chromium-driver \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set Chrome binary location for Selenium
+ENV CHROME_BIN=/usr/bin/chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver
+
+# Install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY app.py helpers.py crypto.py ./
+COPY app.py helpers.py crypto.py arl_manager.py ./
 COPY routes/ ./routes/
 
 # Expose port
@@ -19,8 +33,8 @@ ENV DEEZER_ARL=""
 ENV API_KEY=""
 ENV PORT=3000
 
-# Create deemix temp directory
-RUN mkdir -p /tmp/deemix-imgs
+# Create directories
+RUN mkdir -p /tmp/deemix-imgs /app/config
 
 # Run with Gunicorn (production WSGI server)
 # --workers 1: Single worker process
