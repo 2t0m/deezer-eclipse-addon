@@ -1,6 +1,6 @@
 services:
   deezer-addon:
-    image: deezer-eclipse-addon:latest
+    image: ghcr.io/2t0m/deezer-eclipse-addon:main
     container_name: deezer-eclipse-addon
     restart: unless-stopped
     environment:
