@@ -1,6 +1,9 @@
 # Deezer Eclipse Addon - Production Docker Image
 FROM python:3.13-slim
 
+# Build argument to invalidate cache
+ARG CACHEBUST=1
+
 WORKDIR /app
 
 # Install Chrome/Chromium and dependencies for Selenium (ARL auto-refresh)
