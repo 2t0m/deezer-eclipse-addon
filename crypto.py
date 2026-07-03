@@ -108,11 +108,9 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
                 if bytes_to_send is not None and total_yielded >= bytes_to_send:
                     break
     
-    # Flush remaining data
+    # Flush remaining DECRYPTED data only (ignore incomplete buffer < 2048 bytes)
+    # DO NOT add incomplete buffer to avoid corrupting MP3 for Android
     if output_buffer:
-        if buffer:
-            output_buffer.extend(buffer)
-        
         data_to_yield = bytes(output_buffer)
         
         # Handle remaining skips
@@ -134,6 +132,3 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
     
     # Log completion
     log_debug(f"✓ Streamed {chunk_index} chunks (decrypted={total_decrypted}, yielded={total_yielded})")
-    # Only log completion for significant streams (not test ranges)
-    if track_name and total_yielded > 100000:  # > 100KB
-        log_info(f"Track {track_id} streamed - \"{track_name[:40]}...\"")

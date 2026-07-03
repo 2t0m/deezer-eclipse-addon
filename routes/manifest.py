@@ -18,10 +18,10 @@ def register_routes(app, api_key):
         return jsonify({
             'id': 'com.deezer.eclipse',
             'name': 'Deezer',
-            'version': '1.0.1',
-            'description': 'Stream full tracks from Deezer',
+            'version': '1.5.4',
+            'description': 'Stream full tracks from Deezer via Apple Music ISRC matching. MP3 128kbps quality.',
             'icon': 'https://e-cdns-images.dzcdn.net/images/common/deezer-logo-2019.svg',
-            'resources': ['stream'],
-            'types': ['track'],
+            'resources': ['stream', 'search'],
+            'types': ['track', 'album', 'artist'],
             'contentType': 'music'
         })
