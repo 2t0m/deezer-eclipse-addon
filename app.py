@@ -65,7 +65,20 @@ if not login_success:
         print(f"⚠️  Use API endpoint to refresh ARL: POST /{API_KEY}/arl/refresh", flush=True)
 
 # HTTP session for streaming (reuses connections, avoids SSL handshakes)
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
 streaming_session = requests.Session()
+
+# Configure connection pool for better performance
+adapter = HTTPAdapter(
+    pool_connections=10,  # Number of connection pools
+    pool_maxsize=20,      # Max connections per pool
+    max_retries=Retry(total=3, backoff_factor=0.1, status_forcelist=[500, 502, 503, 504])
+)
+streaming_session.mount('http://', adapter)
+streaming_session.mount('https://', adapter)
+
 streaming_session.headers.update({
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
 })

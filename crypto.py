@@ -22,8 +22,8 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
     
     # Configuration
     decrypt_chunk_size = 2048      # Deezer encryption chunk size (fixed)
-    download_chunk_size = 65536    # Download 64KB at a time
-    yield_size = 65536             # Yield 64KB chunks
+    download_chunk_size = 262144   # Download 256KB at a time (increased for better performance)
+    yield_size = 131072            # Yield 128KB chunks (increased for better performance)
     
     # Buffers and counters
     chunk_index = 0

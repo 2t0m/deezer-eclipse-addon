@@ -185,31 +185,27 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 log_debug(f"⚠ get_tracks_url failed: {type(e).__name__} - {e}")
                 pass
             
-            # Fallback to preview if no valid stream URL
+            # No fallback - return error if stream not available
             if not download_url:
-                log_debug(f"Track {track_id} geo-restricted, using preview")
-                preview_url = track_info.get('TRACK_PREVIEW')
-                if preview_url:
-                    log_debug(f"→ Preview URL: {preview_url}")
-                    return Response(
-                        streaming_session.get(preview_url, stream=True, timeout=30).iter_content(chunk_size=131072),
-                        headers={'Content-Type': 'audio/mpeg', 'Cache-Control': 'public, max-age=3600'}
-                    )
+                log_debug(f"Track {track_id} geo-restricted, no stream available")
                 return jsonify({'error': 'No stream available (geo-restricted)'}), 451
             
             # Get Content-Length from Deezer for better iOS compatibility
+            # Only fetch if Range request (saves ~500ms-2s on regular streams)
             content_length = None
-            try:
-                head_response = streaming_session.head(download_url, timeout=5)
-                if head_response.status_code == 200:
-                    content_length = head_response.headers.get('Content-Length')
-                    if content_length:
-                        log_debug(f"→ Content-Length: {content_length} bytes")
-            except Exception as e:
-                log_debug(f"⚠ Could not get Content-Length: {e}")
+            range_header = request.headers.get('Range')
+            
+            if range_header:
+                try:
+                    head_response = streaming_session.head(download_url, timeout=1)  # Reduced from 5s to 1s
+                    if head_response.status_code == 200:
+                        content_length = head_response.headers.get('Content-Length')
+                        if content_length:
+                            log_debug(f"→ Content-Length: {content_length} bytes")
+                except Exception as e:
+                    log_debug(f"⚠ Could not get Content-Length: {e}")
             
             # Parse Range header (iOS uses this to calculate duration)
-            range_header = request.headers.get('Range')
             start_byte = 0
             end_byte = None
             is_range_request = False
