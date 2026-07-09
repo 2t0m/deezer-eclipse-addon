@@ -2,9 +2,12 @@
 Search routes for Eclipse Music addon
 """
 
+import logging
 from flask import request, jsonify
 import requests
-from helpers import validate_token, is_track_streamable, log_debug, log_info
+from helpers import validate_token, is_track_streamable
+
+logger = logging.getLogger(__name__)
 
 
 def register_routes(app, api_key, dz, deezer_api):
@@ -16,16 +19,13 @@ def register_routes(app, api_key, dz, deezer_api):
         if not validate_token(token, api_key):
             return jsonify({'error': 'Unauthorized'}), 401
         
-        # Log query parameters (DEBUG only)
-        log_debug(f"🔎 Search request: {dict(request.args)}")
-        
         query = request.args.get('q', '')
         
         if not query:
             return jsonify({'error': 'Query parameter required'}), 400
         
         try:
-            log_debug(f"🔍 Searching: \"{query}\" (all types)")
+            logger.debug(f"Searching: {query}")
             
             # Build base URL for streamURL
             base_url = f"https://{request.host}"
@@ -62,7 +62,7 @@ def register_routes(app, api_key, dz, deezer_api):
                                 if len(streamable_tracks) >= 20:
                                     break
             except Exception as e:
-                log_debug(f"⚠ Track search error: {e}")
+                logger.debug(f"Track search error: {e}")
             
             # SEARCH ALBUMS
             try:
@@ -82,7 +82,7 @@ def register_routes(app, api_key, dz, deezer_api):
                         }
                         albums.append(album_obj)
             except Exception as e:
-                log_debug(f"⚠ Album search error: {e}")
+                logger.debug(f"Album search error: {e}")
             
             # SEARCH ARTISTS
             try:
@@ -97,10 +97,10 @@ def register_routes(app, api_key, dz, deezer_api):
                         }
                         artists.append(artist_obj)
             except Exception as e:
-                log_debug(f"⚠ Artist search error: {e}")
+                logger.debug(f"Artist search error: {e}")
             
             # Log results
-            log_info(f"[search] [{user_agent}] \"{query[:40]}...\": {len(streamable_tracks)} tracks, {len(albums)} albums, {len(artists)} artists")
+            logger.info(f"Search: {query[:40]}: {len(streamable_tracks)} tracks, {len(albums)} albums, {len(artists)} artists")
             
             # Return combined results
             return jsonify({
@@ -110,5 +110,5 @@ def register_routes(app, api_key, dz, deezer_api):
             })
             
         except Exception as e:
-            log_info(f"[search] [{user_agent}] ⚠ Error: {e}")
+            logger.error(f"Search error: {e}")
             return jsonify({'error': str(e)}), 500

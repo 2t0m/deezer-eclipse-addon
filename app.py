@@ -3,66 +3,87 @@ Deezer Eclipse Addon - Streaming addon for Eclipse Music iOS app
 Streams full Deezer tracks (not 30s previews) with live Blowfish decryption
 """
 
+import os
+import logging
+import tempfile
 from flask import Flask
 from flask_cors import CORS
 import requests
-import os
-import tempfile
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from dotenv import load_dotenv
 from deezer import Deezer
 from deemix.settings import load as loadSettings
-from arl_manager import create_arl_manager_from_env, load_arl_from_persistent_storage
 
 # Load environment variables
 load_dotenv()
 
+# Configure logging level from environment
+LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+log_level_map = {
+    'DEBUG': logging.DEBUG,
+    'INFO': logging.INFO,
+    'WARNING': logging.WARNING,
+    'ERROR': logging.ERROR,
+    'CRITICAL': logging.CRITICAL
+}
+
+# Custom formatter to match Gunicorn style with tags
+class GunicornFormatter(logging.Formatter):
+    def format(self, record):
+        # Extract tag from logger name
+        logger_name = record.name.split('.')[-1]
+        tag_map = {
+            'app': 'App',
+            'helpers': 'Deezer',
+            'search': 'Search',
+            'catalog': 'Catalog',
+            'stream': 'Stream',
+            'crypto': 'Crypto'
+        }
+        tag = tag_map.get(logger_name, logger_name.capitalize())
+        
+        # Format: [YYYY-MM-DD HH:MM:SS +0000] [PID] [LEVEL] [Tag] Message
+        timestamp = self.formatTime(record, '%Y-%m-%d %H:%M:%S %z')
+        pid = os.getpid()
+        return f"[{timestamp}] [{pid}] [{record.levelname}] [{tag}] {record.getMessage()}"
+
+# Configure root logger with custom formatter
+handler = logging.StreamHandler()
+handler.setFormatter(GunicornFormatter())
+logging.basicConfig(
+    level=log_level_map.get(LOG_LEVEL, logging.INFO),
+    handlers=[handler]
+)
+logger = logging.getLogger(__name__)
+
 # Configuration
 DEEZER_API = 'https://api.deezer.com'
 API_KEY = os.getenv('API_KEY', '')
-DEBUG = os.getenv('DEBUG', 'false').lower() == 'true'
 
 # Initialize Flask app
 app = Flask(__name__)
 CORS(app)
 
-# Initialize Deezer client with auto-refresh ARL
+# Initialize Deezer client
 dz = Deezer()
 login_success = False
 
-# Try to load ARL from persistent storage (Docker volume)
-DEEZER_ARL = load_arl_from_persistent_storage()
+# Load ARL from environment variable
+DEEZER_ARL = os.getenv('DEEZER_ARL', '').strip()
 
-# Try to login with stored ARL
-if DEEZER_ARL:
+if not DEEZER_ARL:
+    logger.error("DEEZER_ARL environment variable not set")
+    logger.error("Please set DEEZER_ARL in docker-compose.yml or .env file")
+    logger.error("To get your ARL: Open https://www.deezer.com, login, press F12, Application tab, Cookies, copy 'arl' value")
+else:
+    # Try to login with ARL
     login_success = dz.login_via_arl(DEEZER_ARL)
-    status = '✓ Success' if login_success else '✗ Failed'
-    print(f"🎵 Deezer login: {status}", flush=True)
-
-# If login failed, attempt auto-refresh
-if not login_success:
-    print(f"🔄 Login failed, attempting auto-refresh ARL...", flush=True)
-    try:
-        arl_manager = create_arl_manager_from_env()
-        if arl_manager:
-            new_arl = arl_manager.get_new_arl()
-            if new_arl:
-                print(f"✅ New ARL retrieved: {new_arl[:20]}...", flush=True)
-                arl_manager.save_arl_to_env(new_arl)
-                # Reload and test new ARL
-                DEEZER_ARL = new_arl
-                login_success = dz.login_via_arl(DEEZER_ARL)
-                if login_success:
-                    print(f"🎵 Deezer login with new ARL: ✓ Success", flush=True)
-                else:
-                    print(f"❌ Login still failed with new ARL", flush=True)
-            else:
-                print(f"❌ Failed to retrieve new ARL", flush=True)
-        else:
-            print(f"⚠️  Auto-refresh not configured (missing DEEZER_EMAIL/PASSWORD)", flush=True)
-            print(f"⚠️  Use API endpoint to refresh ARL: POST /{API_KEY}/arl/refresh", flush=True)
-    except Exception as e:
-        print(f"❌ Auto-refresh error: {e}", flush=True)
-        print(f"⚠️  Use API endpoint to refresh ARL: POST /{API_KEY}/arl/refresh", flush=True)
+    if login_success:
+        logger.info(f"Deezer login successful with ARL: {DEEZER_ARL[:8]}...")
+    else:
+        logger.error("Deezer login failed - ARL may be invalid or expired")
+        logger.error("To get a new ARL: Open https://www.deezer.com, login, press F12, Application tab, Cookies, copy 'arl' value")
 
 # HTTP session for streaming (reuses connections, avoids SSL handshakes)
 from requests.adapters import HTTPAdapter
@@ -92,15 +113,13 @@ settings['createCDFolder'] = False
 settings['createArtistFolder'] = False
 settings['createAlbumFolder'] = False
 
-if DEBUG:
-    print(f"📁 Download location: {settings['downloadLocation']}", flush=True)
-    print(f"🔍 Debug mode: ENABLED", flush=True)
-else:
-    print(f"📊 Log mode: NORMAL (minimal)", flush=True)
+logger.info("Configuration loaded successfully")
+logger.info(f"Log level: {LOG_LEVEL}")
+logger.debug(f"Download location: {settings['downloadLocation']}")
 
 # Register all routes
 from routes import register_all_routes
-register_all_routes(app, API_KEY, dz, DEEZER_API, streaming_session, DEBUG, create_arl_manager_from_env)
+register_all_routes(app, API_KEY, dz, DEEZER_API, streaming_session)
 
 if __name__ == '__main__':
     port = int(os.getenv('PORT', 3000))

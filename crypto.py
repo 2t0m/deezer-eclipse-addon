@@ -2,8 +2,10 @@
 Blowfish decryption for Deezer streams
 """
 
+import logging
 from deemix.utils.crypto import generateBlowfishKey, decryptChunk
-from helpers import log_debug, log_info
+
+logger = logging.getLogger(__name__)
 
 
 def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte=0, end_byte=None, track_name=None):
@@ -17,7 +19,7 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
     response = streaming_session.get(download_url, stream=True, timeout=30)
     
     if response.status_code != 200:
-        log_debug(f"✗ Download failed: {response.status_code}")
+        logger.debug(f"✗ Download failed: {response.status_code}")
         return
     
     # Configuration
@@ -38,9 +40,9 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
     is_range_request = end_byte is not None
     
     if is_range_request:
-        log_debug(f"→ Range mode: skip={bytes_to_skip}, send={bytes_to_send}")
+        logger.debug(f"Range mode: skip={bytes_to_skip}, send={bytes_to_send}")
     else:
-        log_debug(f"→ Full stream mode")
+        logger.debug(f"Full stream mode")
     
     # Generate track-specific Blowfish decryption key
     blowfish_key = generateBlowfishKey(str(track_id))
@@ -67,7 +69,7 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
                     decrypted = decryptChunk(blowfish_key, current_chunk)
                     output_buffer.extend(decrypted)
                 except Exception as e:
-                    log_debug(f"⚠ Decrypt error chunk {chunk_index}: {e}")
+                    logger.debug(f"⚠ Decrypt error chunk {chunk_index}: {e}")
                     output_buffer.extend(current_chunk)
             else:
                 output_buffer.extend(current_chunk)
@@ -131,4 +133,4 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
             total_yielded += len(data_to_yield)
     
     # Log completion
-    log_debug(f"✓ Streamed {chunk_index} chunks (decrypted={total_decrypted}, yielded={total_yielded})")
+    logger.debug(f"Streamed {chunk_index} chunks (decrypted={total_decrypted}, yielded={total_yielded})")

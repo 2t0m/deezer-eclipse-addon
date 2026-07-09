@@ -2,26 +2,10 @@
 Helper functions for Deezer Eclipse Addon
 """
 
+import logging
 from flask import request
-from datetime import datetime
 
-# Global debug flag
-_DEBUG = False
-
-def set_debug(debug):
-    """Set global debug flag"""
-    global _DEBUG
-    _DEBUG = debug
-
-def log_debug(message):
-    """Log debug message (only in DEBUG mode)"""
-    if _DEBUG:
-        print(message, flush=True)
-
-def log_info(message):
-    """Log info message (always logged with timestamp)"""
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    print(f"{timestamp} - {message}", flush=True)
+logger = logging.getLogger(__name__)
 
 
 def validate_token(token, api_key):
@@ -30,7 +14,7 @@ def validate_token(token, api_key):
         return True  # No security if API_KEY not configured
     
     if token != api_key:
-        log_info(f"🚫 Unauthorized: token {token[:10]}... from {request.remote_addr}")
+        logger.warning(f"Unauthorized: token {token[:10]}... from {request.remote_addr}")
         return False
     
     return True

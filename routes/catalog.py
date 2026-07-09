@@ -2,9 +2,12 @@
 Catalog routes for Eclipse Music addon (album/artist details)
 """
 
+import logging
 from flask import request, jsonify
 import requests
-from helpers import validate_token, is_track_streamable, log_debug, log_info
+from helpers import validate_token, is_track_streamable
+
+logger = logging.getLogger(__name__)
 
 
 def register_routes(app, api_key, dz, deezer_api):
@@ -23,7 +26,7 @@ def register_routes(app, api_key, dz, deezer_api):
             # Get album details from Deezer API
             album_response = requests.get(f'{deezer_api}/album/{album_id}', timeout=5)
             if album_response.status_code != 200:
-                log_info(f"[catalog:album] [{user_agent}] ⚠ Album {album_id} not found")
+                logger.info(f"Album {album_id} not found")
                 return jsonify({'error': 'Album not found'}), 404
             
             album_data = album_response.json()
@@ -64,12 +67,11 @@ def register_routes(app, api_key, dz, deezer_api):
                 'tracks': tracks
             }
             
-            log_info(f"[catalog:album] [{user_agent}] Album {album_id}: {len(tracks)} tracks")
+            logger.info(f"Album {album_id}: {len(tracks)} tracks")
             return jsonify(response)
             
         except Exception as e:
-            user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-            log_info(f"[catalog:album] [{user_agent}] ⚠ Error {album_id}: {e}")
+            logger.error(f"Album {album_id} error: {e}")
             return jsonify({'error': str(e)}), 500
     
     @app.route('/<token>/artist/<artist_id>')
@@ -85,7 +87,7 @@ def register_routes(app, api_key, dz, deezer_api):
             # Get artist details from Deezer API
             artist_response = requests.get(f'{deezer_api}/artist/{artist_id}', timeout=5)
             if artist_response.status_code != 200:
-                log_info(f"[catalog:artist] [{user_agent}] ⚠ Artist {artist_id} not found")
+                logger.info(f"Artist {artist_id} not found")
                 return jsonify({'error': 'Artist not found'}), 404
             
             artist_data = artist_response.json()
@@ -113,7 +115,7 @@ def register_routes(app, api_key, dz, deezer_api):
                                 }
                                 top_tracks.append(track_obj)
             except Exception as e:
-                log_debug(f"⚠ Top tracks error: {e}")
+                logger.debug(f"Top tracks error: {e}")
             
             # Get albums
             albums = []
@@ -134,7 +136,7 @@ def register_routes(app, api_key, dz, deezer_api):
                         }
                         albums.append(album_obj)
             except Exception as e:
-                log_debug(f"⚠ Albums error: {e}")
+                logger.debug(f"Albums error: {e}")
             
             # Build response
             artwork_url = (
@@ -159,10 +161,9 @@ def register_routes(app, api_key, dz, deezer_api):
             if 'genres' in artist_data:
                 response['genres'] = artist_data['genres']
             
-            log_info(f"[catalog:artist] [{user_agent}] Artist {artist_id}: {len(top_tracks)} tracks, {len(albums)} albums")
+            logger.info(f"Artist {artist_id}: {len(top_tracks)} tracks, {len(albums)} albums")
             return jsonify(response)
             
         except Exception as e:
-            user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-            log_info(f"[catalog:artist] [{user_agent}] ⚠ Error {artist_id}: {e}")
+            logger.error(f"Artist {artist_id} error: {e}")
             return jsonify({'error': str(e)}), 500

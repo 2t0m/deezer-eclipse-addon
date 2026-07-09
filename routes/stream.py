@@ -2,10 +2,13 @@
 Streaming routes for Eclipse Music addon
 """
 
+import logging
 from flask import request, jsonify, Response
 import requests
-from helpers import validate_token, is_track_streamable, log_debug, log_info
+from helpers import validate_token, is_track_streamable
 from crypto import generate_decrypted
+
+logger = logging.getLogger(__name__)
 
 
 def register_routes(app, api_key, dz, deezer_api, streaming_session):
@@ -16,9 +19,6 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
         """Resolve ISRC to Deezer track with automatic fallbacks"""
         if not validate_token(token, api_key):
             return jsonify({'error': 'Unauthorized'}), 401
-        
-        # Log query parameters (DEBUG only)
-        log_debug(f"🎯 AppleMusic stream request: {dict(request.args)}")
         
         isrc = request.args.get('isrc', '')
         apple_track_id = request.args.get('trackId', '')
@@ -43,13 +43,13 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                             deezer_track_id = candidate_id
                             track_title = title
                             method = "Direct ISRC"
-                            log_debug(f"✓ Direct ISRC found: {deezer_track_id}")
+                            logger.debug(f"Direct ISRC found: {deezer_track_id}")
             except:
                 pass
             
             # METHOD 2: Apple Music iTunes API resolution (if direct ISRC failed)
             if not deezer_track_id and apple_track_id:
-                log_debug(f"→ Direct ISRC failed, trying Apple Music API for trackId {apple_track_id}")
+                logger.debug(f"Direct ISRC failed, trying Apple Music API for trackId {apple_track_id}")
                 try:
                     # Try with country parameter (US is most common)
                     itunes_url = f'https://itunes.apple.com/lookup?id={apple_track_id}&country=US&entity=song'
@@ -60,17 +60,17 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                         results = itunes_data.get('results', [])
                         result_count = itunes_data.get('resultCount', 0)
                         
-                        log_debug(f"→ Apple Music API: {result_count} results")
+                        logger.debug(f"Apple Music API: {result_count} results")
                         
                         if results and len(results) > 0:
                             track_info = results[0]
                             title = track_info.get('trackName', '')
                             artist = track_info.get('artistName', '')
                             
-                            log_debug(f"→ Apple Music response: kind={track_info.get('kind', 'N/A')}, title={title}, artist={artist}")
+                            logger.debug(f"Apple Music response: kind={track_info.get('kind', 'N/A')}, title={title}, artist={artist}")
                             
                             if title and artist:
-                                log_debug(f"→ Apple Music found: \"{title}\" by {artist}")
+                                logger.debug(f"Apple Music found: {title} by {artist}")
                                 
                                 # Search in Deezer by title/artist with higher limit
                                 search_query = f"{title} {artist}"
@@ -79,7 +79,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                                 
                                 if search_response.status_code == 200:
                                     results = search_response.json().get('data', [])
-                                    log_debug(f"→ Deezer search found {len(results)} candidates")
+                                    logger.debug(f"Deezer search found {len(results)} candidates")
                                     
                                     # Test ALL results to find a streamable one
                                     tested = 0
@@ -92,39 +92,37 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                                                 deezer_track_id = track_id
                                                 track_title = track_title_check
                                                 method = "AppleMusic"
-                                                log_debug(f"✓ Apple Music resolved: {isrc} → track {deezer_track_id} (tested {tested}/{len(results)} candidates)")
+                                                logger.debug(f"Apple Music resolved: {isrc} -> track {deezer_track_id} (tested {tested}/{len(results)} candidates)")
                                                 break
                                             else:
-                                                log_debug(f"  → Candidate {track_id} not streamable")
+                                                logger.debug(f"Candidate {track_id} not streamable")
                                     
                                     if not deezer_track_id:
-                                        log_debug(f"⚠ Apple Music: found \"{title}\" but no streamable version in {tested} Deezer results")
+                                        logger.debug(f"Apple Music: found {title} but no streamable version in {tested} Deezer results")
                                 else:
-                                    log_debug(f"⚠ Deezer search failed with status {search_response.status_code}")
+                                    logger.debug(f"Deezer search failed with status {search_response.status_code}")
                             else:
-                                log_debug(f"⚠ Apple Music: missing title or artist")
+                                logger.debug(f"Apple Music: missing title or artist")
                         else:
-                            log_debug(f"⚠ Apple Music: no track info found for ID {apple_track_id}")
+                            logger.debug(f"Apple Music: no track info found for ID {apple_track_id}")
                     else:
-                        log_debug(f"⚠ Apple Music API returned {itunes_response.status_code}")
+                        logger.debug(f"Apple Music API returned {itunes_response.status_code}")
                 except Exception as e:
-                    log_debug(f"⚠ Apple Music error: {e}")
+                    logger.debug(f"Apple Music error: {e}")
             
             if not deezer_track_id:
-                user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-                log_info(f"[applemusic] [{user_agent}] ⚠ ISRC:{isrc} not found")
+                logger.info(f"ISRC {isrc} not found")
                 return jsonify({'error': 'Track not available'}), 404
             
             # Return proxy URL for streamable track
             base_url = f"https://{request.host}"
             proxy_url = f"{base_url}/{token}/proxy/stream/{deezer_track_id}"
             
-            log_debug(f"🍎 ISRC:{isrc} → Track {deezer_track_id} ({method}) \"{track_title[:40]}...\"")
+            logger.debug(f"ISRC {isrc} -> Track {deezer_track_id} ({method}) {track_title[:40]}")
             return jsonify({'url': proxy_url})
             
         except Exception as e:
-            user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-            log_info(f"[applemusic] [{user_agent}] ⚠ Error: {e}")
+            logger.error(f"AppleMusic stream error: {e}")
             return jsonify({'error': str(e)}), 500
     
     @app.route('/<token>/proxy/stream/<track_id>', methods=['GET', 'HEAD', 'OPTIONS'])
@@ -141,9 +139,9 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 'Access-Control-Allow-Headers': '*'
             })
         
-        log_debug(f"🎵 Streaming: track {track_id} (method: {request.method})")
-        log_debug(f"→ User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
-        log_debug(f"→ Range: {request.headers.get('Range', 'None')}")
+        logger.debug(f"Streaming: track {track_id} (method: {request.method})")
+        logger.debug(f"User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
+        logger.debug(f"Range: {request.headers.get('Range', 'None')}")
         
         try:
             # Get track metadata from Deezer
@@ -154,14 +152,14 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
             track_title = track_info.get('SNG_TITLE', 'Unknown')
             artist = track_info.get('ART_NAME', 'Unknown')
             track_name = f"{track_title} - {artist}"
-            log_debug(f"→ Track: {track_name}")
+            logger.debug(f"Track: {track_name}")
             
             # Get track token for download URL generation
             track_token = track_info.get('TRACK_TOKEN')
             if not track_token:
                 return jsonify({'error': 'No track token'}), 404
             
-            log_debug(f"→ Getting stream URL (MP3_128)")
+            logger.debug(f"Getting stream URL (MP3_128)")
             
             # Get encrypted stream URL (MP3_128 for free accounts)
             download_url = None
@@ -174,20 +172,20 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     # Check if it's a valid string URL (not an exception object)
                     if isinstance(url, str) and url.startswith('http'):
                         download_url = url
-                        log_debug(f"→ Stream URL: {download_url[:80]}...")
+                        logger.debug(f"Stream URL: {download_url[:80]}...")
                     else:
-                        log_debug(f"⚠ Invalid URL type: {type(url).__name__}")
+                        logger.debug(f"Invalid URL type: {type(url).__name__}")
                 else:
-                    log_debug(f"⚠ No URLs returned")
+                    logger.debug(f"No URLs returned")
                         
             except Exception as e:
                 # get_tracks_url can raise WrongGeolocation or other exceptions
-                log_debug(f"⚠ get_tracks_url failed: {type(e).__name__} - {e}")
+                logger.debug(f"get_tracks_url failed: {type(e).__name__} - {e}")
                 pass
             
             # No fallback - return error if stream not available
             if not download_url:
-                log_debug(f"Track {track_id} geo-restricted, no stream available")
+                logger.debug(f"Track {track_id} geo-restricted, no stream available")
                 return jsonify({'error': 'No stream available (geo-restricted)'}), 451
             
             # Get Content-Length from Deezer for better iOS compatibility
@@ -201,9 +199,9 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     if head_response.status_code == 200:
                         content_length = head_response.headers.get('Content-Length')
                         if content_length:
-                            log_debug(f"→ Content-Length: {content_length} bytes")
+                            logger.debug(f"Content-Length: {content_length} bytes")
                 except Exception as e:
-                    log_debug(f"⚠ Could not get Content-Length: {e}")
+                    logger.debug(f"Could not get Content-Length: {e}")
             
             # Parse Range header (iOS uses this to calculate duration)
             start_byte = 0
@@ -225,16 +223,16 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     
                     # Clamp to file size
                     end_byte = min(end_byte, int(content_length) - 1)
-                    log_debug(f"→ Range request: bytes {start_byte}-{end_byte}/{content_length}")
+                    logger.debug(f"Range request: bytes {start_byte}-{end_byte}/{content_length}")
                 except Exception as e:
-                    log_debug(f"⚠ Failed to parse Range header: {e}")
+                    logger.debug(f"Failed to parse Range header: {e}")
                     is_range_request = False
                     start_byte = 0
                     end_byte = None
             
             # Handle HEAD request (iOS checks file existence/size)
             if request.method == 'HEAD':
-                log_debug(f"→ HEAD request - returning headers only")
+                logger.debug(f"HEAD request - returning headers only")
                 headers = {
                     'Content-Type': 'audio/mpeg',
                     'Accept-Ranges': 'bytes',
@@ -247,7 +245,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     headers['Content-Length'] = content_length
                 return Response(status=200, headers=headers)
             
-            log_debug(f"→ Starting live decryption...")
+            logger.debug(f"Starting live decryption...")
             
             # Build response headers
             headers = {
@@ -266,27 +264,24 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 range_length = end_byte - start_byte + 1
                 headers['Content-Length'] = str(range_length)
                 headers['Content-Range'] = f'bytes {start_byte}-{end_byte}/{content_length}'
-                log_debug(f"→ 206 Partial Content: {range_length} bytes")
+                logger.debug(f"206 Partial Content: {range_length} bytes")
                 # Log only significant streams (not test ranges)
                 if range_length > 100000:  # > 100KB = real stream
-                    user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-                    log_info(f"[proxy] [{user_agent}] Track {track_id} requested - \"{track_name[:40]}...\"")
+                    logger.info(f"Track {track_id} requested: {track_name[:40]}")
             else:
                 # Don't set Content-Length for full streams - decrypted size differs from encrypted
                 # Android and other strict clients will hang if Content-Length doesn't match actual data
-                log_debug(f"→ 200 OK: streaming without Content-Length (chunked transfer)")
-                user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-                log_info(f"[proxy] [{user_agent}] Track {track_id} requested - \"{track_name[:40]}...\"")
+                logger.debug(f"200 OK: streaming without Content-Length (chunked transfer)")
+                logger.info(f"Track {track_id} requested: {track_name[:40]}")
             
             # Capture user_agent before creating generator (request context may not be available later)
-            user_agent_captured = request.headers.get('User-Agent', 'Unknown')[:30]
             
             # Log streaming completion after response
             def generate_with_completion_log():
                 for chunk in generate_decrypted(dz, streaming_session, download_url, track_id, start_byte, end_byte, track_name):
                     yield chunk
                 # Log completion after all chunks sent
-                log_info(f"[proxy] [{user_agent_captured}] Track {track_id} streamed - \"{track_name[:40]}...\"")
+                logger.info(f"Track {track_id} streamed: {track_name[:40]}")
             
             return Response(
                 generate_with_completion_log(),
@@ -295,8 +290,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
             )
             
         except Exception as e:
-            user_agent = request.headers.get('User-Agent', 'Unknown')[:30]
-            log_info(f"[proxy] [{user_agent}] ⚠ Error track {track_id}: {e}")
-            log_debug(f"Traceback: {e}")
+            logger.error(f"Stream error track {track_id}: {e}")
+            logger.debug(f"Traceback: {e}")
             return jsonify({'error': str(e)}), 500
 
