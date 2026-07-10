@@ -9,7 +9,8 @@ services:
       - API_KEY=${API_KEY}
       - PORT=3000
       - TZ=${TZ:-Europe/Paris}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-INFO}
+      - GUNICORN_LOG_LEVEL=${GUNICORN_LOG_LEVEL:-WARNING}
     ports:
       - "3000:3000"
     networks:

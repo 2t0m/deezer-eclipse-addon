@@ -19,7 +19,7 @@ from deemix.settings import load as loadSettings
 load_dotenv()
 
 # Configure logging level from environment
-LOG_LEVEL = os.environ.get('LOG_LEVEL', 'INFO').upper()
+APP_LOG_LEVEL = os.environ.get('APP_LOG_LEVEL', 'INFO').upper()
 log_level_map = {
     'DEBUG': logging.DEBUG,
     'INFO': logging.INFO,
@@ -52,7 +52,7 @@ class GunicornFormatter(logging.Formatter):
 handler = logging.StreamHandler()
 handler.setFormatter(GunicornFormatter())
 logging.basicConfig(
-    level=log_level_map.get(LOG_LEVEL, logging.INFO),
+    level=log_level_map.get(APP_LOG_LEVEL, logging.INFO),
     handlers=[handler]
 )
 logger = logging.getLogger(__name__)
@@ -114,7 +114,8 @@ settings['createArtistFolder'] = False
 settings['createAlbumFolder'] = False
 
 logger.info("Configuration loaded successfully")
-logger.info(f"Log level: {LOG_LEVEL}")
+logger.info(f"App log level: {APP_LOG_LEVEL}")
+logger.info(f"Gunicorn log level: {os.environ.get('GUNICORN_LOG_LEVEL', 'WARNING').upper()}")
 logger.debug(f"Download location: {settings['downloadLocation']}")
 
 # Register all routes

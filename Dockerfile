@@ -21,9 +21,26 @@ EXPOSE 3000
 ENV DEEZER_ARL=""
 ENV API_KEY=""
 ENV PORT=3000
+ENV APP_LOG_LEVEL=INFO
+ENV GUNICORN_LOG_LEVEL=WARNING
 
 # Create directories
 RUN mkdir -p /tmp/deemix-imgs /app/config
 
-# Run with Gunicorn (production WSGI server)
-CMD ["gunicorn", "--bind", "0.0.0.0:3000", "--workers", "1", "--threads", "4", "--timeout", "300", "--access-logfile", "-", "--capture-output", "app:app"]
+# Run with Gunicorn (production WSGI server) with dynamic log level
+CMD GUNICORN_LEVEL=$(echo "${GUNICORN_LOG_LEVEL:-WARNING}" | tr '[:upper:]' '[:lower:]') && \
+    if [ "$GUNICORN_LEVEL" = "info" ] || [ "$GUNICORN_LEVEL" = "debug" ]; then \
+        ACCESS_LOG="-"; \
+    else \
+        ACCESS_LOG="/dev/null"; \
+    fi && \
+    exec gunicorn \
+    --bind 0.0.0.0:3000 \
+    --workers 1 \
+    --threads 4 \
+    --timeout 300 \
+    --log-level "$GUNICORN_LEVEL" \
+    --access-logfile "$ACCESS_LOG" \
+    --error-logfile - \
+    --capture-output \
+    app:app

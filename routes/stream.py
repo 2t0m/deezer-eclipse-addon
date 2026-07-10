@@ -281,7 +281,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 for chunk in generate_decrypted(dz, streaming_session, download_url, track_id, start_byte, end_byte, track_name):
                     yield chunk
                 # Log completion after all chunks sent
-                logger.info(f"Track {track_id} streamed: {track_name[:40]}")
+                logger.debug(f"Track {track_id} streamed: {track_name[:40]}")
             
             return Response(
                 generate_with_completion_log(),
