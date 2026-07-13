@@ -125,6 +125,33 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
             logger.error(f"AppleMusic stream error: {e}")
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/<token>/stream', methods=['GET', 'HEAD', 'OPTIONS'])
+    def deezer_stream(token):
+        """Stream Deezer track by trackId (Eclipse web client) - returns URL JSON"""
+        # Handle CORS preflight
+        if request.method == 'OPTIONS':
+            headers = {
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+                'Access-Control-Allow-Headers': '*',
+                'Access-Control-Max-Age': '3600'
+            }
+            return Response(status=200, headers=headers)
+        
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        track_id = request.args.get('trackId', '')
+        if not track_id:
+            return jsonify({'error': 'trackId required'}), 400
+        
+        # Return proxy URL (same format as applemusic/stream)
+        base_url = f"https://{request.host}"
+        proxy_url = f"{base_url}/{token}/proxy/stream/{track_id}"
+        
+        logger.debug(f"[Stream] Deezer track {track_id} -> {proxy_url}")
+        return jsonify({'url': proxy_url})
+    
     @app.route('/<token>/proxy/stream/<track_id>', methods=['GET', 'HEAD', 'OPTIONS'])
     def proxy_stream(token, track_id):
         """Stream Deezer track with live Blowfish decryption (no temp file)"""

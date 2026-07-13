@@ -110,8 +110,24 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
                 if bytes_to_send is not None and total_yielded >= bytes_to_send:
                     break
     
-    # Flush remaining DECRYPTED data only (ignore incomplete buffer < 2048 bytes)
-    # DO NOT add incomplete buffer to avoid corrupting MP3 for Android
+    # Process final incomplete chunk (< 2048 bytes) - critical for complete MP3 playback
+    if buffer and len(buffer) > 0:
+        logger.debug(f"[Crypto] Processing final buffer: {len(buffer)} bytes (chunk_index={chunk_index})")
+        # Determine if this chunk should be decrypted
+        if chunk_index % 3 == 0 and len(buffer) == decrypt_chunk_size:
+            # Full chunk that needs decryption
+            try:
+                decrypted = decryptChunk(blowfish_key, buffer)
+                output_buffer.extend(decrypted)
+            except:
+                output_buffer.extend(buffer)
+        else:
+            # Partial chunk or non-encrypted chunk - append as-is
+            output_buffer.extend(buffer)
+        
+        total_decrypted += len(buffer)
+    
+    # Flush remaining data
     if output_buffer:
         data_to_yield = bytes(output_buffer)
         
