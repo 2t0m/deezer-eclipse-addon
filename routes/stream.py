@@ -74,7 +74,14 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                                 
                                 # Search in Deezer by title/artist with higher limit
                                 search_query = f"{title} {artist}"
-                                search_url = f'{deezer_api}/search/track?q={search_query}&limit=50'
+                                
+                                # Normalize query for better Deezer API matching
+                                # Deezer API is strict: "Remaster" != "Remastered"
+                                normalized_query = search_query.replace('Remastered', 'Remaster').replace('remastered', 'remaster')
+                                if normalized_query != search_query:
+                                    logger.debug(f"Query normalized: '{search_query}' -> '{normalized_query}'")
+                                
+                                search_url = f'{deezer_api}/search/track?q={normalized_query}&limit=50'
                                 search_response = requests.get(search_url, timeout=3)
                                 
                                 if search_response.status_code == 200:

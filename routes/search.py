@@ -25,7 +25,16 @@ def register_routes(app, api_key, dz, deezer_api):
             return jsonify({'error': 'Query parameter required'}), 400
         
         try:
-            logger.debug(f"Searching: {query}")
+            # Normalize query for better Deezer API matching
+            # Deezer API is strict: "Remaster" != "Remastered"
+            normalized_query = query
+            normalized_query = normalized_query.replace('Remastered', 'Remaster')
+            normalized_query = normalized_query.replace('remastered', 'remaster')
+            
+            if normalized_query != query:
+                logger.debug(f"Query normalized: '{query}' -> '{normalized_query}'")
+            
+            logger.debug(f"Searching: {normalized_query}")
             
             # Build base URL for streamURL
             base_url = f"https://{request.host}"
@@ -38,7 +47,7 @@ def register_routes(app, api_key, dz, deezer_api):
             
             # SEARCH TRACKS
             try:
-                search_response = requests.get(f'{deezer_api}/search/track', params={'q': query, 'limit': 25}, timeout=5)
+                search_response = requests.get(f'{deezer_api}/search/track', params={'q': normalized_query, 'limit': 25}, timeout=5)
                 if search_response.status_code == 200:
                     results = search_response.json().get('data', [])
                     for track in results:
@@ -66,7 +75,7 @@ def register_routes(app, api_key, dz, deezer_api):
             
             # SEARCH ALBUMS
             try:
-                search_response = requests.get(f'{deezer_api}/search/album', params={'q': query, 'limit': 25}, timeout=5)
+                search_response = requests.get(f'{deezer_api}/search/album', params={'q': normalized_query, 'limit': 25}, timeout=5)
                 if search_response.status_code == 200:
                     results = search_response.json().get('data', [])
                     for album in results:
@@ -86,7 +95,7 @@ def register_routes(app, api_key, dz, deezer_api):
             
             # SEARCH ARTISTS
             try:
-                search_response = requests.get(f'{deezer_api}/search/artist', params={'q': query, 'limit': 25}, timeout=5)
+                search_response = requests.get(f'{deezer_api}/search/artist', params={'q': normalized_query, 'limit': 25}, timeout=5)
                 if search_response.status_code == 200:
                     results = search_response.json().get('data', [])
                     for artist in results:
