@@ -20,7 +20,7 @@ def register_routes(app, api_key):
             'name': 'Deezer',
             'version': '1.5.4',
             'description': 'Stream full tracks from Deezer via Apple Music ISRC matching. MP3 128kbps quality.',
-            'icon': 'https://e-cdns-images.dzcdn.net/images/common/deezer-logo-2019.svg',
+            'icon': 'https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Deezer_New_Icon.svg/250px-Deezer_New_Icon.svg.png',
             'resources': ['stream', 'search'],
             'types': ['track', 'album', 'artist'],
             'contentType': 'music'
