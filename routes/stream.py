@@ -14,38 +14,72 @@ logger = logging.getLogger(__name__)
 def register_routes(app, api_key, dz, deezer_api, streaming_session):
     """Register streaming routes"""
     
+    @app.route('/<token>/applemusic/warm', methods=['POST', 'GET'])
+    def applemusic_warm(token):
+        """Warm/preload ISRC to Deezer track mapping (cache warming endpoint)"""
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # Get ISRC from query params or JSON body
+        isrc = request.args.get('isrc', '') or request.json.get('isrc', '') if request.json else ''
+        
+        if not isrc:
+            return jsonify({'error': 'ISRC required'}), 400
+        
+        try:
+            # Quick ISRC resolution check (simplified version without fallbacks)
+            track_response = requests.get(f'{deezer_api}/track/isrc:{isrc}', timeout=3)
+            if track_response.status_code == 200:
+                track_data = track_response.json()
+                deezer_track_id = track_data.get('id')
+                
+                if deezer_track_id:
+                    # Verify it's streamable
+                    streamable, title = is_track_streamable(dz, deezer_track_id)
+                    if streamable:
+                        logger.debug(f"Warm: ISRC {isrc} -> Track {deezer_track_id} ({title[:40]})")
+                        return jsonify({'status': 'ok', 'trackId': str(deezer_track_id)})
+            
+            logger.debug(f"Warm: ISRC {isrc} not available")
+            return jsonify({'status': 'unavailable'}), 200
+            
+        except Exception as e:
+            logger.error(f"Warm error: {e}")
+            return jsonify({'error': str(e)}), 500
+    
     @app.route('/<token>/applemusic/stream')
     def applemusic_stream(token):
-        """Resolve ISRC to Deezer track with automatic fallbacks"""
+        """Resolve ISRC or Apple Music trackId to Deezer track with automatic fallbacks"""
         if not validate_token(token, api_key):
             return jsonify({'error': 'Unauthorized'}), 401
         
         isrc = request.args.get('isrc', '')
         apple_track_id = request.args.get('trackId', '')
         
-        if not isrc:
-            return jsonify({'error': 'ISRC required'}), 400
+        if not isrc and not apple_track_id:
+            return jsonify({'error': 'ISRC or trackId required'}), 400
         
         try:
             deezer_track_id = None
             track_title = "Unknown"
             method = "unknown"
             
-            # METHOD 1: Direct ISRC resolution in Deezer
-            try:
-                track_response = requests.get(f'{deezer_api}/track/isrc:{isrc}', timeout=3)
-                if track_response.status_code == 200:
-                    track_data = track_response.json()
-                    candidate_id = track_data.get('id')
-                    if candidate_id:
-                        streamable, title = is_track_streamable(dz, candidate_id)
-                        if streamable:
-                            deezer_track_id = candidate_id
-                            track_title = title
-                            method = "Direct ISRC"
-                            logger.debug(f"Direct ISRC found: {deezer_track_id}")
-            except:
-                pass
+            # METHOD 1: Direct ISRC resolution in Deezer (if ISRC provided)
+            if isrc:
+                try:
+                    track_response = requests.get(f'{deezer_api}/track/isrc:{isrc}', timeout=3)
+                    if track_response.status_code == 200:
+                        track_data = track_response.json()
+                        candidate_id = track_data.get('id')
+                        if candidate_id:
+                            streamable, title = is_track_streamable(dz, candidate_id)
+                            if streamable:
+                                deezer_track_id = candidate_id
+                                track_title = title
+                                method = "Direct ISRC"
+                                logger.debug(f"Direct ISRC found: {deezer_track_id}")
+                except:
+                    pass
             
             # METHOD 2: Apple Music iTunes API resolution (if direct ISRC failed)
             if not deezer_track_id and apple_track_id:
@@ -118,14 +152,16 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     logger.debug(f"Apple Music error: {e}")
             
             if not deezer_track_id:
-                logger.info(f"ISRC {isrc} not found")
+                identifier = isrc if isrc else f"trackId {apple_track_id}"
+                logger.info(f"{identifier} not found")
                 return jsonify({'error': 'Track not available'}), 404
             
             # Return proxy URL for streamable track
             base_url = f"https://{request.host}"
             proxy_url = f"{base_url}/{token}/proxy/stream/{deezer_track_id}"
             
-            logger.debug(f"ISRC {isrc} -> Track {deezer_track_id} ({method}) {track_title[:40]}")
+            identifier = isrc if isrc else f"trackId {apple_track_id}"
+            logger.debug(f"{identifier} -> Track {deezer_track_id} ({method}) {track_title[:40]}")
             return jsonify({'url': proxy_url})
             
         except Exception as e:
