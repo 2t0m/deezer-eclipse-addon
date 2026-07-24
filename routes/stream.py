@@ -168,6 +168,17 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
             logger.error(f"AppleMusic stream error: {e}")
             return jsonify({'error': str(e)}), 500
     
+    @app.route('/<token>/tidal/resolve-isrc')
+    def tidal_resolve_isrc(token):
+        """Resolve Tidal ISRC to Deezer track (placeholder endpoint)"""
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # This endpoint is called by some clients but not fully implemented yet
+        # Return a valid empty response to avoid 404 errors
+        logger.debug("tidal/resolve-isrc endpoint called (not fully implemented)")
+        return jsonify({'status': 'not_implemented', 'tracks': []}), 200
+    
     @app.route('/<token>/stream', methods=['GET', 'HEAD', 'OPTIONS'])
     def deezer_stream(token):
         """Stream Deezer track by trackId (Eclipse web client) - returns URL JSON"""
@@ -258,20 +269,20 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 logger.debug(f"Track {track_id} geo-restricted, no stream available")
                 return jsonify({'error': 'No stream available (geo-restricted)'}), 451
             
-            # Get Content-Length from Deezer for better iOS compatibility
-            # Only fetch if Range request (saves ~500ms-2s on regular streams)
+            # Get Content-Length from Deezer (ALWAYS, for iOS compatibility)
+            # iOS needs Content-Length to enable seeking/range requests
             content_length = None
-            range_header = request.headers.get('Range')
+            try:
+                head_response = streaming_session.head(download_url, timeout=1)
+                if head_response.status_code == 200:
+                    content_length = head_response.headers.get('Content-Length')
+                    if content_length:
+                        logger.debug(f"[Stream] Content-Length: {content_length} bytes")
+            except Exception as e:
+                logger.debug(f"[Stream] Could not get Content-Length: {e}")
             
-            if range_header:
-                try:
-                    head_response = streaming_session.head(download_url, timeout=1)  # Reduced from 5s to 1s
-                    if head_response.status_code == 200:
-                        content_length = head_response.headers.get('Content-Length')
-                        if content_length:
-                            logger.debug(f"Content-Length: {content_length} bytes")
-                except Exception as e:
-                    logger.debug(f"Could not get Content-Length: {e}")
+            # Parse Range header for partial content requests
+            range_header = request.headers.get('Range')
             
             # Parse Range header (iOS uses this to calculate duration)
             start_byte = 0
@@ -334,15 +345,19 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 range_length = end_byte - start_byte + 1
                 headers['Content-Length'] = str(range_length)
                 headers['Content-Range'] = f'bytes {start_byte}-{end_byte}/{content_length}'
-                logger.debug(f"206 Partial Content: {range_length} bytes")
+                logger.debug(f"[Stream] 206 Partial Content: {range_length} bytes")
                 # Log only significant streams (not test ranges)
                 if range_length > 100000:  # > 100KB = real stream
-                    logger.info(f"Track {track_id} requested: {track_name[:40]}")
+                    logger.info(f"[Stream] Track {track_id} requested: {track_name[:40]}")
             else:
-                # Don't set Content-Length for full streams - decrypted size differs from encrypted
-                # Android and other strict clients will hang if Content-Length doesn't match actual data
-                logger.debug(f"200 OK: streaming without Content-Length (chunked transfer)")
-                logger.info(f"Track {track_id} requested: {track_name[:40]}")
+                # Set Content-Length for full streams (Blowfish ECB preserves file size)
+                # iOS needs this to enable seeking and range requests
+                if content_length:
+                    headers['Content-Length'] = content_length
+                    logger.debug(f"[Stream] 200 OK: Content-Length={content_length}")
+                else:
+                    logger.debug(f"[Stream] 200 OK: streaming without Content-Length (chunked transfer)")
+                logger.info(f"[Stream] Track {track_id} requested: {track_name[:40]}")
             
             # Capture user_agent before creating generator (request context may not be available later)
             

@@ -13,6 +13,17 @@ logger = logging.getLogger(__name__)
 def register_routes(app, api_key, dz, deezer_api):
     """Register catalog routes for albums and artists"""
     
+    @app.route('/<token>/music/resolve-album', methods=['POST'])
+    def resolve_album(token):
+        """Resolve Apple Music album ID to Deezer album (placeholder endpoint)"""
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+        
+        # This endpoint is called by some clients but not fully implemented yet
+        # Return a valid empty response to avoid 404 errors
+        logger.debug("resolve-album endpoint called (not fully implemented)")
+        return jsonify({'status': 'not_implemented', 'albums': []}), 200
+    
     @app.route('/<token>/album/<album_id>')
     def album_details(token, album_id):
         """Get album details with track list"""

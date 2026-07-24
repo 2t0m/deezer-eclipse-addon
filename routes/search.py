@@ -14,6 +14,7 @@ def register_routes(app, api_key, dz, deezer_api):
     """Register search routes"""
     
     @app.route('/<token>/music/search')
+    @app.route('/<token>/search')
     def search_content(token):
         """Search for tracks, albums and artists on Deezer (returns all types)"""
         if not validate_token(token, api_key):
