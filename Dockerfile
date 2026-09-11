@@ -13,6 +13,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY app.py helpers.py crypto.py ./
 COPY routes/ ./routes/
+COPY startup_diagnostics.py ./
 
 # Expose port
 EXPOSE 3000
@@ -23,24 +24,23 @@ ENV API_KEY=""
 ENV PORT=3000
 ENV APP_LOG_LEVEL=INFO
 ENV GUNICORN_LOG_LEVEL=WARNING
+ENV STARTUP_CHECK_TIMEOUT=120
 
 # Create directories
 RUN mkdir -p /tmp/deemix-imgs /app/config
 
 # Run with Gunicorn (production WSGI server) with dynamic log level
-CMD GUNICORN_LEVEL=$(echo "${GUNICORN_LOG_LEVEL:-WARNING}" | tr '[:upper:]' '[:lower:]') && \
-    if [ "$GUNICORN_LEVEL" = "info" ] || [ "$GUNICORN_LEVEL" = "debug" ]; then \
-        ACCESS_LOG="-"; \
-    else \
-        ACCESS_LOG="/dev/null"; \
-    fi && \
+# Run live diagnostics once, then start Gunicorn even if diagnostics fail
+CMD timeout "${STARTUP_CHECK_TIMEOUT}s" python startup_diagnostics.py || \
+    echo "[startup-check] Checker failed or timed out; continuing startup"; \
+    GUNICORN_LEVEL=$(echo "${GUNICORN_LOG_LEVEL:-WARNING}" | tr '[:upper:]' '[:lower:]') && \
     exec gunicorn \
     --bind 0.0.0.0:3000 \
     --workers 1 \
     --threads 4 \
     --timeout 300 \
     --log-level "$GUNICORN_LEVEL" \
-    --access-logfile "$ACCESS_LOG" \
+    --access-logfile /dev/null \
     --error-logfile - \
     --capture-output \
     app:app

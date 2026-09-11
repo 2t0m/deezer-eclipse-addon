@@ -119,7 +119,8 @@ def generate_decrypted(dz, streaming_session, download_url, track_id, start_byte
             try:
                 decrypted = decryptChunk(blowfish_key, buffer)
                 output_buffer.extend(decrypted)
-            except:
+            except Exception as error:
+                logger.debug(f"Final chunk decrypt failed: {error}")
                 output_buffer.extend(buffer)
         else:
             # Partial chunk or non-encrypted chunk - append as-is

@@ -6,14 +6,16 @@ Streams full Deezer tracks (not 30s previews) with live Blowfish decryption
 import os
 import logging
 import tempfile
-from flask import Flask
+from flask import Flask, request
 from flask_cors import CORS
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 from deezer import Deezer
 from deemix.settings import load as loadSettings
+from helpers import simplify_user_agent
 
 # Load environment variables
 load_dotenv()
@@ -39,7 +41,9 @@ class GunicornFormatter(logging.Formatter):
             'search': 'Search',
             'catalog': 'Catalog',
             'stream': 'Stream',
-            'crypto': 'Crypto'
+            'crypto': 'Crypto',
+            'access': 'Access',
+            'startup': 'Startup'
         }
         tag = tag_map.get(logger_name, logger_name.capitalize())
         
@@ -56,6 +60,15 @@ logging.basicConfig(
     handlers=[handler]
 )
 logger = logging.getLogger(__name__)
+access_logger = logging.getLogger('access')
+
+
+def redact_token_path(path):
+    """Hide the first URL segment, which contains the addon API token."""
+    segments = path.split('/')
+    if len(segments) > 1 and segments[1]:
+        segments[1] = '<token>'
+    return '/'.join(segments)
 
 # Configuration
 DEEZER_API = 'https://api.deezer.com'
@@ -63,7 +76,29 @@ API_KEY = os.getenv('API_KEY', '')
 
 # Initialize Flask app
 app = Flask(__name__)
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
 CORS(app)
+
+
+@app.after_request
+def log_access(response):
+    """Write privacy-safe access logs using the application log format."""
+    path = redact_token_path(request.path)
+    size = response.headers.get('Content-Length', '-')
+    user_agent = simplify_user_agent(request.headers.get('User-Agent', ''))
+    if response.status_code >= 500:
+        log_level = logging.ERROR
+    elif response.status_code >= 400:
+        log_level = logging.WARNING
+    else:
+        log_level = logging.DEBUG
+
+    access_logger.log(
+        log_level,
+        f'{request.method} {path} -> {response.status_code} {size}B '
+        f'[ua={user_agent}] [ip={request.remote_addr or "unknown"}]'
+    )
+    return response
 
 # Initialize Deezer client
 dz = Deezer()
@@ -80,7 +115,7 @@ else:
     # Try to login with ARL
     login_success = dz.login_via_arl(DEEZER_ARL)
     if login_success:
-        logger.info(f"Deezer login successful with ARL: {DEEZER_ARL[:8]}...")
+        logger.info("Deezer login successful")
     else:
         logger.error("Deezer login failed - ARL may be invalid or expired")
         logger.error("To get a new ARL: Open https://www.deezer.com, login, press F12, Application tab, Cookies, copy 'arl' value")

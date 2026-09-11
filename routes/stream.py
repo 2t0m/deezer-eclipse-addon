@@ -5,23 +5,145 @@ Streaming routes for Eclipse Music addon
 import logging
 from flask import request, jsonify, Response
 import requests
-from helpers import validate_token, is_track_streamable
+from helpers import (
+    build_track_search_queries,
+    validate_token,
+    get_request_base_url,
+    is_track_streamable,
+    is_exact_recording,
+    normalize_isrc,
+    parse_byte_range,
+    simplify_user_agent,
+)
 from crypto import generate_decrypted
 
 logger = logging.getLogger(__name__)
 
 
+def resolve_deezer_isrc(dz, deezer_api, isrc):
+    """Resolve an ISRC only when Deezer returns a streamable exact recording."""
+    normalized_isrc = normalize_isrc(isrc)
+    if not normalized_isrc:
+        return None
+
+    response = requests.get(f'{deezer_api}/track/isrc:{normalized_isrc}', timeout=3)
+    if response.status_code != 200:
+        return None
+
+    track = response.json()
+    returned_isrc = normalize_isrc(track.get('isrc', ''))
+    if returned_isrc and returned_isrc != normalized_isrc:
+        return None
+
+    track_id = track.get('id')
+    if not track_id:
+        return None
+
+    streamable, _ = is_track_streamable(dz, track_id)
+    return track if streamable else None
+
+
+def build_resolved_item(track):
+    """Build the track identity object expected by Eclipse's resolve endpoint."""
+    album = track.get('album', {})
+    item = {
+        'id': str(track.get('id')),
+        'type': 'track',
+        'title': track.get('title', ''),
+        'artist': track.get('artist', {}).get('name', ''),
+        'album': album.get('title', ''),
+        'durationMs': int(track.get('duration', 0)) * 1000,
+        'artworkURL': album.get('cover_big', album.get('cover_medium', ''))
+    }
+    isrc = normalize_isrc(track.get('isrc', ''))
+    if isrc:
+        item['isrc'] = isrc
+    return item
+
+
 def register_routes(app, api_key, dz, deezer_api, streaming_session):
     """Register streaming routes"""
+
+    @app.route('/<token>/resolve-isrc')
+    def resolve_isrc(token):
+        """Resolve an exact ISRC to a streamable Deezer track ID."""
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        raw_isrc = request.args.get('isrc', '')
+        normalized_isrc = normalize_isrc(raw_isrc)
+        if not normalized_isrc:
+            return jsonify({'error': 'Valid ISRC required'}), 400
+
+        try:
+            track = resolve_deezer_isrc(dz, deezer_api, normalized_isrc)
+            track_id = str(track['id']) if track else None
+            logger.debug(f"[Resolve] ISRC {normalized_isrc} -> {track_id or 'null'}")
+            return jsonify({'trackId': track_id})
+        except requests.RequestException as error:
+            logger.warning(f"[Resolve] Deezer ISRC lookup failed: {error}")
+            return jsonify({'trackId': None})
+
+    @app.route('/<token>/resolve')
+    def resolve_recording(token):
+        """Resolve a recording identity to a streamable Deezer item."""
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        raw_isrc = request.args.get('isrc', '')
+        title = request.args.get('title', '').strip()
+        artist = request.args.get('artist', '').strip()
+        duration_ms = request.args.get('durationMs')
+
+        try:
+            if raw_isrc:
+                normalized_isrc = normalize_isrc(raw_isrc)
+                if not normalized_isrc:
+                    return jsonify({'error': 'Invalid ISRC'}), 400
+                track = resolve_deezer_isrc(dz, deezer_api, normalized_isrc)
+                return jsonify({'item': build_resolved_item(track) if track else None})
+
+            if not title or not artist:
+                return jsonify({'error': 'title and artist required'}), 400
+
+            search_query = f'{artist} {title}'
+            seen_track_ids = set()
+            for query_variant in build_track_search_queries(search_query):
+                response = requests.get(
+                    f'{deezer_api}/search/track',
+                    params={'q': query_variant, 'limit': 25},
+                    timeout=3
+                )
+                if response.status_code != 200:
+                    continue
+
+                for track in response.json().get('data', []):
+                    track_id = track.get('id')
+                    if not track_id or track_id in seen_track_ids:
+                        continue
+                    seen_track_ids.add(track_id)
+                    if not is_exact_recording(track, title, artist, duration_ms):
+                        continue
+                    streamable, _ = is_track_streamable(dz, track_id)
+                    if streamable:
+                        logger.debug(f"[Resolve] {title} - {artist} -> {track_id}")
+                        return jsonify({'item': build_resolved_item(track)})
+
+            logger.debug(f"[Resolve] {title} - {artist} -> null")
+            return jsonify({'item': None})
+        except requests.RequestException as error:
+            logger.warning(f"[Resolve] Deezer lookup failed: {error}")
+            return jsonify({'item': None})
     
     @app.route('/<token>/applemusic/warm', methods=['POST', 'GET'])
     def applemusic_warm(token):
         """Warm/preload ISRC to Deezer track mapping (cache warming endpoint)"""
         if not validate_token(token, api_key):
             return jsonify({'error': 'Unauthorized'}), 401
-        
+
         # Get ISRC from query params or JSON body
-        isrc = request.args.get('isrc', '') or request.json.get('isrc', '') if request.json else ''
+        payload = request.get_json(silent=True) or {}
+        isrc = request.args.get('isrc', '') or payload.get('isrc', '')
         
         if not isrc:
             return jsonify({'error': 'ISRC required'}), 400
@@ -78,8 +200,8 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                                 track_title = title
                                 method = "Direct ISRC"
                                 logger.debug(f"Direct ISRC found: {deezer_track_id}")
-                except:
-                    pass
+                except (requests.RequestException, TypeError, ValueError) as error:
+                    logger.debug(f"Direct ISRC lookup failed: {error}")
             
             # METHOD 2: Apple Music iTunes API resolution (if direct ISRC failed)
             if not deezer_track_id and apple_track_id:
@@ -157,7 +279,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 return jsonify({'error': 'Track not available'}), 404
             
             # Return proxy URL for streamable track
-            base_url = f"https://{request.host}"
+            base_url = get_request_base_url()
             proxy_url = f"{base_url}/{token}/proxy/stream/{deezer_track_id}"
             
             identifier = isrc if isrc else f"trackId {apple_track_id}"
@@ -167,17 +289,6 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
         except Exception as e:
             logger.error(f"AppleMusic stream error: {e}")
             return jsonify({'error': str(e)}), 500
-    
-    @app.route('/<token>/tidal/resolve-isrc')
-    def tidal_resolve_isrc(token):
-        """Resolve Tidal ISRC to Deezer track (placeholder endpoint)"""
-        if not validate_token(token, api_key):
-            return jsonify({'error': 'Unauthorized'}), 401
-        
-        # This endpoint is called by some clients but not fully implemented yet
-        # Return a valid empty response to avoid 404 errors
-        logger.debug("tidal/resolve-isrc endpoint called (not fully implemented)")
-        return jsonify({'status': 'not_implemented', 'tracks': []}), 200
     
     @app.route('/<token>/stream', methods=['GET', 'HEAD', 'OPTIONS'])
     def deezer_stream(token):
@@ -200,28 +311,73 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
             return jsonify({'error': 'trackId required'}), 400
         
         # Return proxy URL (same format as applemusic/stream)
-        base_url = f"https://{request.host}"
-        proxy_url = f"{base_url}/{token}/proxy/stream/{track_id}"
+        base_url = get_request_base_url()
+        proxy_url = f"{base_url}/{token}/stream/{track_id}"
         
         logger.debug(f"[Stream] Deezer track {track_id} -> {proxy_url}")
         return jsonify({'url': proxy_url})
-    
+
+    @app.route('/<token>/stream/<track_id>', methods=['GET', 'OPTIONS'])
+    def resolve_stream(token, track_id):
+        """Resolve a track ID to a playable audio source."""
+        if request.method == 'OPTIONS':
+            return Response(status=200, headers={
+                'Access-Control-Allow-Origin': '*',
+                'Access-Control-Allow-Methods': 'GET, OPTIONS',
+                'Access-Control-Allow-Headers': request.headers.get(
+                    'Access-Control-Request-Headers',
+                    'Content-Type, Accept'
+                ),
+                'Access-Control-Max-Age': '3600'
+            })
+
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        try:
+            int(track_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid track ID'}), 400
+
+        base_url = get_request_base_url()
+        audio_url = f"{base_url}/{token}/proxy/stream/{track_id}"
+        logger.debug(f"[Stream] Resolving track {track_id} -> {audio_url}")
+        response = jsonify({
+            'url': audio_url,
+            'format': 'mp3',
+            'quality': '128kbps',
+            'codec': 'mp3',
+            'container': 'mp3',
+            'manifest': 'none'
+        })
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
+        return response
+
     @app.route('/<token>/proxy/stream/<track_id>', methods=['GET', 'HEAD', 'OPTIONS'])
     def proxy_stream(token, track_id):
         """Stream Deezer track with live Blowfish decryption (no temp file)"""
-        if not validate_token(token, api_key):
-            return jsonify({'error': 'Unauthorized'}), 401
-        
         # Handle OPTIONS preflight for CORS
         if request.method == 'OPTIONS':
             return Response(status=200, headers={
                 'Access-Control-Allow-Origin': '*',
                 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-                'Access-Control-Allow-Headers': '*'
+                'Access-Control-Allow-Headers': request.headers.get(
+                    'Access-Control-Request-Headers',
+                    'Range, Content-Type, Accept'
+                ),
+                    'Access-Control-Max-Age': '3600',
+                    'Cross-Origin-Resource-Policy': 'cross-origin'
             })
+
+        if not validate_token(token, api_key):
+            return jsonify({'error': 'Unauthorized'}), 401
+
+        if not track_id.isdigit():
+            return jsonify({'error': 'Invalid track ID'}), 400
         
         logger.debug(f"Streaming: track {track_id} (method: {request.method})")
-        logger.debug(f"User-Agent: {request.headers.get('User-Agent', 'Unknown')}")
+        logger.debug(f"Client: {simplify_user_agent(request.headers.get('User-Agent', ''))}")
         logger.debug(f"Range: {request.headers.get('Range', 'None')}")
         
         try:
@@ -290,26 +446,19 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
             is_range_request = False
             
             if range_header and content_length:
-                is_range_request = True
                 try:
-                    # Parse "bytes=start-end" or "bytes=start-"
-                    range_str = range_header.replace('bytes=', '')
-                    if '-' in range_str:
-                        parts = range_str.split('-')
-                        start_byte = int(parts[0]) if parts[0] else 0
-                        end_byte = int(parts[1]) if parts[1] else int(content_length) - 1
-                    else:
-                        start_byte = int(range_str)
-                        end_byte = int(content_length) - 1
-                    
-                    # Clamp to file size
-                    end_byte = min(end_byte, int(content_length) - 1)
+                    start_byte, end_byte = parse_byte_range(range_header, content_length)
+                    is_range_request = True
                     logger.debug(f"Range request: bytes {start_byte}-{end_byte}/{content_length}")
-                except Exception as e:
-                    logger.debug(f"Failed to parse Range header: {e}")
-                    is_range_request = False
-                    start_byte = 0
-                    end_byte = None
+                except (TypeError, ValueError) as error:
+                    logger.debug(f"Rejected Range header: {error}")
+                    return Response(status=416, headers={
+                        'Content-Range': f'bytes */{content_length}',
+                        'Accept-Ranges': 'bytes',
+                        'Access-Control-Allow-Origin': '*',
+                        'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
+                        'Cross-Origin-Resource-Policy': 'cross-origin'
+                    })
             
             # Handle HEAD request (iOS checks file existence/size)
             if request.method == 'HEAD':
@@ -320,11 +469,17 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     'Cache-Control': 'public, max-age=3600',
                     'X-Content-Type-Options': 'nosniff',
                     'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
+                        'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
+                        'Cross-Origin-Resource-Policy': 'cross-origin'
                 }
-                if content_length:
+                status_code = 200
+                if is_range_request:
+                    status_code = 206
+                    headers['Content-Length'] = str(end_byte - start_byte + 1)
+                    headers['Content-Range'] = f'bytes {start_byte}-{end_byte}/{content_length}'
+                elif content_length:
                     headers['Content-Length'] = content_length
-                return Response(status=200, headers=headers)
+                return Response(status=status_code, headers=headers)
             
             logger.debug(f"Starting live decryption...")
             
@@ -335,7 +490,8 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 'Cache-Control': 'public, max-age=3600',
                 'X-Content-Type-Options': 'nosniff',
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Expose-Headers': 'Content-Length, Content-Range'
+                    'Access-Control-Expose-Headers': 'Content-Length, Content-Range',
+                    'Cross-Origin-Resource-Policy': 'cross-origin'
             }
             
             # Set appropriate status code and headers for range requests
@@ -348,7 +504,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                 logger.debug(f"[Stream] 206 Partial Content: {range_length} bytes")
                 # Log only significant streams (not test ranges)
                 if range_length > 100000:  # > 100KB = real stream
-                    logger.info(f"[Stream] Track {track_id} requested: {track_name[:40]}")
+                    logger.info(f"Track {track_id} requested: {track_name[:40]}")
             else:
                 # Set Content-Length for full streams (Blowfish ECB preserves file size)
                 # iOS needs this to enable seeking and range requests
@@ -357,7 +513,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
                     logger.debug(f"[Stream] 200 OK: Content-Length={content_length}")
                 else:
                     logger.debug(f"[Stream] 200 OK: streaming without Content-Length (chunked transfer)")
-                logger.info(f"[Stream] Track {track_id} requested: {track_name[:40]}")
+                logger.info(f"Track {track_id} requested: {track_name[:40]}")
             
             # Capture user_agent before creating generator (request context may not be available later)
             

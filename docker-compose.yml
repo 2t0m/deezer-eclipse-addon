@@ -7,6 +7,8 @@ services:
     environment:
       - DEEZER_ARL=${DEEZER_ARL}
       - API_KEY=${API_KEY}
+      - STARTUP_CHECK_QUERY=${STARTUP_CHECK_QUERY:-Daft Punk}
+      - STARTUP_CHECK_TIMEOUT=${STARTUP_CHECK_TIMEOUT:-120}
       - PORT=3000
       - TZ=${TZ:-Europe/Paris}
       - APP_LOG_LEVEL=${APP_LOG_LEVEL:-INFO}
