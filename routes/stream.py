@@ -342,14 +342,7 @@ def register_routes(app, api_key, dz, deezer_api, streaming_session):
         base_url = get_request_base_url()
         audio_url = f"{base_url}/{token}/proxy/stream/{track_id}"
         logger.debug(f"[Stream] Resolving track {track_id} -> {audio_url}")
-        response = jsonify({
-            'url': audio_url,
-            'format': 'mp3',
-            'quality': '128kbps',
-            'codec': 'mp3',
-            'container': 'mp3',
-            'manifest': 'none'
-        })
+        response = jsonify({'url': audio_url})
         response.headers['Access-Control-Allow-Origin'] = '*'
         response.headers['Cross-Origin-Resource-Policy'] = 'cross-origin'
         return response

@@ -222,7 +222,7 @@ def check_track_endpoints(client, report, base_path, track):
         report,
         'stream resolver path',
         f'{base_path}/stream/{track_id}',
-        validator=require_json_keys('url', 'format', 'codec', 'container', 'manifest')
+        validator=require_json_keys('url')
     )
     call_endpoint(client, report, 'stream OPTIONS', f'{base_path}/stream', method='OPTIONS')
     call_endpoint(client, report, 'stream path OPTIONS', f'{base_path}/stream/{track_id}', method='OPTIONS')

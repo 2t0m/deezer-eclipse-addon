@@ -2,6 +2,7 @@
 Search routes for Eclipse Music addon
 """
 
+import concurrent.futures
 import logging
 from flask import request, jsonify
 import requests
@@ -13,6 +14,22 @@ from helpers import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def get_album_year(deezer_api, album):
+    release_date = album.get('release_date', '')
+    if not release_date and album.get('id'):
+        try:
+            response = requests.get(f"{deezer_api}/album/{album['id']}", timeout=3)
+            if response.status_code == 200:
+                release_date = response.json().get('release_date', '')
+        except requests.RequestException:
+            return 0
+
+    try:
+        return int(release_date.split('-')[0]) if release_date else 0
+    except (TypeError, ValueError):
+        return 0
 
 
 def register_routes(app, api_key, dz, deezer_api):
@@ -96,9 +113,9 @@ def register_routes(app, api_key, dz, deezer_api):
                 search_response = requests.get(f'{deezer_api}/search/album', params={'q': normalized_query, 'limit': 25}, timeout=5)
                 if search_response.status_code == 200:
                     results = search_response.json().get('data', [])
-                    for album in results:
-                        release_date = album.get('release_date', '')
-                        year = int(release_date.split('-')[0]) if release_date and release_date.split('-')[0] else 0
+                    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as executor:
+                        years = list(executor.map(lambda album: get_album_year(deezer_api, album), results))
+                    for album, year in zip(results, years):
                         album_obj = {
                             'id': str(album.get('id', '')),
                             'title': album.get('title', ''),
